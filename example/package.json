@@ -9,8 +9,16 @@
     "start": "react-native start"
   },
   "dependencies": {
+    "@gorhom/bottom-sheet": "^4",
+    "@react-native-firebase/app": "^12.7.4",
+    "@react-native-firebase/firestore": "^12.7.3",
     "react": "16.13.1",
-    "react-native": "0.63.4"
+    "react-native": "0.63.4",
+    "react-native-gesture-handler": "^1.10.3",
+    "react-native-reanimated": "^2.2.0",
+    "react-native-svg": "^12.1.1",
+    "react-native-vector-icons": "^8.1.0",
+    "react-native-webrtc": "^1.89.3"
   },
   "devDependencies": {
     "@babel/core": "^7.12.10",
