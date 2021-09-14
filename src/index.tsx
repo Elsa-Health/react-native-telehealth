@@ -1,260 +1,293 @@
 import React, { useState, useRef } from 'react';
 import { View, StyleSheet } from 'react-native';
 import {
-  EventOnAddStream,
-  MediaStream,
-  RTCIceCandidate,
-  RTCPeerConnection,
-  RTCPeerConnectionConfiguration,
-  RTCSessionDescription,
+	EventOnAddStream,
+	MediaStream,
+	RTCIceCandidate,
+	RTCPeerConnection,
+	RTCPeerConnectionConfiguration,
+	RTCSessionDescription,
 } from 'react-native-webrtc';
 import Button from './Button';
 import IncomingCall from './IncomingCall';
 import Utils from './utils';
 import VideoCall from './VideoCall';
 import type { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
+import InCallManager from 'react-native-incall-manager';
 import { useEffect } from 'react';
 import { ElsaSheetContainer } from './VideoCall';
 
 export { ElsaSheetContainer };
 
 type TeleHealthProps = {
-  callRef: FirebaseFirestoreTypes.DocumentReference<FirebaseFirestoreTypes.DocumentData>;
-  connectiongConfig: RTCPeerConnectionConfiguration;
-  isClinician: boolean;
-  isPatient: boolean;
+	callRef: FirebaseFirestoreTypes.DocumentReference<FirebaseFirestoreTypes.DocumentData>;
+	connectiongConfig: RTCPeerConnectionConfiguration;
+	isClinician: boolean;
+	isPatient: boolean;
 };
 
 const TeleHealth: React.FC<TeleHealthProps> = ({
-  callRef,
-  connectiongConfig: configuration,
-  isClinician = false,
-  isPatient = true,
+	callRef,
+	connectiongConfig: configuration,
+	isClinician = false,
+	isPatient = true,
 }) => {
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  const [incommingCall, setIncommingCall] = useState(false);
-  const pc = useRef<RTCPeerConnection>();
-  const connecting = useRef(false);
+	const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+	const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+	const [incommingCall, setIncommingCall] = useState(false);
+	const [isMuted, setIsMuted] = useState(false);
+	const pc = useRef<RTCPeerConnection>();
+	const connecting = useRef(false);
 
-  useEffect(() => {
-    const subscribe = callRef.onSnapshot((snapshot) => {
-      const data = snapshot.data();
+	useEffect(() => {
+		const subscribe = callRef.onSnapshot((snapshot) => {
+			const data = snapshot.data();
 
-      // on answer start the call
-      if (pc.current && !pc.current.remoteDescription && data && data.answer) {
-        pc.current.setRemoteDescription(new RTCSessionDescription(data.answer));
-      }
+			// on answer start the call
+			if (
+				pc.current &&
+				!pc.current.remoteDescription &&
+				data &&
+				data.answer
+			) {
+				pc.current.setRemoteDescription(
+					new RTCSessionDescription(data.answer)
+				);
+			}
 
-      // if there is offer for chatId set the incoming call flag
-      if (data && data.offer && !connecting.current) {
-        setIncommingCall(true);
-      }
-    });
+			// if there is offer for chatId set the incoming call flag
+			if (data && data.offer && !connecting.current) {
+				setIncommingCall(true);
+			}
+		});
 
-    // On delete of a collection call hangup
-    // The other side has clicked hangup
-    const subscribeDelete = callRef
-      .collection('callee')
-      .onSnapshot((snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'removed') {
-            hangup();
-          }
-        });
-      });
+		// On delete of a collection call hangup
+		// The other side has clicked hangup
+		const subscribeDelete = callRef
+			.collection('callee')
+			.onSnapshot((snapshot) => {
+				snapshot.docChanges().forEach((change) => {
+					if (change.type === 'removed') {
+						hangup();
+					}
+				});
+			});
 
-    return () => {
-      subscribe();
-      subscribeDelete();
-    };
-  });
+		return () => {
+			subscribe();
+			subscribeDelete();
+		};
+	});
 
-  const setupWebrtc = async () => {
-    pc.current = new RTCPeerConnection(configuration);
+	const setupWebrtc = async () => {
+		pc.current = new RTCPeerConnection(configuration);
+		console.log('new RTCPeerConnection');
 
-    // get the audio and video stream for the call
-    const stream = await Utils.getStream();
-    if (stream) {
-      setLocalStream(stream);
-      pc.current.addStream(stream);
-    }
+		// get the audio and video stream for the call
+		const stream = await Utils.getStream();
+		console.log('gotten streams');
+		if (stream) {
+			setLocalStream(stream);
+			pc.current.addStream(stream);
+		}
 
-    // get the remote stream once its available
-    pc.current.onaddstream = (event: EventOnAddStream) => {
-      setRemoteStream(event.stream);
-    };
-  };
-  const create = async () => {
-    console.log('calling');
+		console.log('new RTCPeerConnection');
 
-    connecting.current = true;
+		// get the remote stream once its available
+		pc.current.onaddstream = (event: EventOnAddStream) => {
+			console.log('added stream');
+			setRemoteStream(event.stream);
+		};
+	};
+	const create = async () => {
+		console.log('calling', configuration);
 
-    // set up webRTC
-    await setupWebrtc();
+		connecting.current = true;
 
-    // Document for the call
+		// set up webRTC
+		await setupWebrtc();
+		console.log('set up webrtc');
 
-    // Exchange the ICE candidates between the caller and callee
-    collectIceCandidates(callRef, 'caller', 'callee');
+		// Document for the call
 
-    if (pc.current) {
-      // create the offer for the call
-      // store the offer under the document
-      const offer = await pc.current.createOffer();
-      pc.current.setLocalDescription(offer);
+		// Exchange the ICE candidates between the caller and callee
+		collectIceCandidates(callRef, 'caller', 'callee');
+		console.log('exchange');
 
-      const cWithOffer = {
-        offer: {
-          type: offer.type,
-          sdp: offer.sdp,
-        },
-      };
+		if (pc.current) {
+			// create the offer for the call
+			// store the offer under the document
+			const offer = await pc.current.createOffer();
+			pc.current.setLocalDescription(offer);
 
-      callRef.set(cWithOffer);
-    }
-  };
+			const cWithOffer = {
+				offer: {
+					type: offer.type,
+					sdp: offer.sdp,
+				},
+			};
 
-  const collectIceCandidates = async (
-    callRef: FirebaseFirestoreTypes.DocumentReference<FirebaseFirestoreTypes.DocumentData>,
-    localName: string,
-    remoteName: string
-  ) => {
-    const candidateCollection = callRef.collection(localName);
+			callRef.set(cWithOffer);
+		}
+	};
 
-    if (pc.current) {
-      // On new ICE candidate add it to firestore
-      pc.current.onicecandidate = (event) => {
-        if (event.candidate) {
-          candidateCollection.add(event.candidate);
-        }
-      };
-    }
+	const collectIceCandidates = async (
+		callRef: FirebaseFirestoreTypes.DocumentReference<FirebaseFirestoreTypes.DocumentData>,
+		localName: string,
+		remoteName: string
+	) => {
+		const candidateCollection = callRef.collection(localName);
 
-    // Get the ICE candidate added to firestore and update the local PC
-    callRef.collection(remoteName).onSnapshot((snapshot) => {
-      snapshot.docChanges().forEach((change: any) => {
-        if (change.type === 'added') {
-          const candidateDoc = change.doc.data();
-          const candidate = new RTCIceCandidate(candidateDoc);
-          pc.current?.addIceCandidate(candidate);
-        }
-      });
-    });
-  };
-  const join = async () => {
-    console.log('joining the call');
+		if (pc.current) {
+			// On new ICE candidate add it to firestore
+			pc.current.onicecandidate = (event) => {
+				if (event.candidate) {
+					candidateCollection.add(event.candidate);
+				}
+			};
+		}
 
-    connecting.current = true;
-    setIncommingCall(false);
+		// Get the ICE candidate added to firestore and update the local PC
+		callRef.collection(remoteName).onSnapshot((snapshot) => {
+			snapshot.docChanges().forEach((change: any) => {
+				if (change.type === 'added') {
+					const candidateDoc = change.doc.data();
+					const candidate = new RTCIceCandidate(candidateDoc);
+					pc.current?.addIceCandidate(candidate);
+				}
+			});
+		});
+	};
+	const join = async () => {
+		console.log('joining the call');
 
-    const offer = (await callRef.get()).data()?.offer;
+		connecting.current = true;
+		setIncommingCall(false);
 
-    if (offer) {
-      // setup webrtc
+		const offer = (await callRef.get()).data()?.offer;
 
-      await setupWebrtc();
+		if (offer) {
+			// setup webrtc
 
-      // Exchange the ICE candidates
-      // Chec the parameters, Its reversed. Since joining part is callee
-      collectIceCandidates(callRef, 'callee', 'caller');
+			await setupWebrtc();
 
-      if (pc.current) {
-        pc.current.setRemoteDescription(new RTCSessionDescription(offer));
+			// Exchange the ICE candidates
+			// Chec the parameters, Its reversed. Since joining part is callee
+			collectIceCandidates(callRef, 'callee', 'caller');
 
-        // create the answer for the call
-        // update the document with answer
-        const answer = await pc.current.createAnswer();
-        pc.current.setLocalDescription(answer);
+			if (pc.current) {
+				pc.current.setRemoteDescription(
+					new RTCSessionDescription(offer)
+				);
 
-        const cWithAnswer = {
-          answer: {
-            type: answer.type,
-            sdp: answer.sdp,
-          },
-        };
+				// create the answer for the call
+				// update the document with answer
+				const answer = await pc.current.createAnswer();
+				pc.current.setLocalDescription(answer);
 
-        callRef.set(cWithAnswer);
-      }
-    }
-  };
+				InCallManager.start({ media: 'video' });
 
-  /**
-   *  For disconnecting the call close the connection, release the stream and delete
-   * 	the document for the call
-   */
-  const hangup = async () => {
-    setIncommingCall(false);
-    connecting.current = false;
-    streamCleanup();
-    firestoreCleanUp();
-    if (pc.current) {
-      pc.current.close();
-    }
-  };
+				// Set the call to be loud speaker mode
+				// InCallManager.setForceSpeakerphoneOn(true);
+				InCallManager.setSpeakerphoneOn(true);
 
-  const streamCleanup = () => {
-    if (localStream) {
-      localStream.getTracks().forEach((track) => {
-        track.stop();
-      });
-      localStream.release();
-    }
+				const cWithAnswer = {
+					answer: {
+						type: answer.type,
+						sdp: answer.sdp,
+					},
+				};
 
-    setLocalStream(null);
-    setRemoteStream(null);
-  };
+				callRef.set(cWithAnswer);
+			}
+		}
+	};
 
-  const firestoreCleanUp = async () => {
-    if (callRef) {
-      const calleeCandidate = await callRef.collection('callee').get();
-      calleeCandidate.forEach(async (candidate) => {
-        await candidate.ref.delete();
-      });
+	/**
+	 *  For disconnecting the call close the connection, release the stream and delete
+	 * 	the document for the call
+	 */
+	const hangup = async () => {
+		setIncommingCall(false);
+		connecting.current = false;
+		streamCleanup();
+		firestoreCleanUp();
 
-      const callerCandidate = await callRef.collection('caller').get();
-      callerCandidate.forEach(async (candidate) => {
-        await candidate.ref.delete();
-      });
+		InCallManager.stop();
+		if (pc.current) {
+			pc.current.close();
+		}
+	};
 
-      callRef.delete();
-    }
-  };
+	const muteCall = () => {
+		InCallManager.setMicrophoneMute(!isMuted);
+		setIsMuted(!isMuted);
+	};
 
-  // Displays the getting call screen
-  if (incommingCall) {
-    return <IncomingCall hangup={hangup} join={join} />;
-  }
+	const streamCleanup = () => {
+		if (localStream) {
+			localStream.getTracks().forEach((track) => {
+				track.stop();
+			});
+			localStream.release();
+		}
 
-  // Display the local stream on calling
-  // Display both local and remote streams onve the call is connected
-  if (localStream) {
-    return (
-      <VideoCall
-        localStream={localStream}
-        remoteStream={remoteStream}
-        hangup={hangup}
-        isPatient={isPatient}
-        isClinician={isClinician}
-      />
-    );
-  }
+		setLocalStream(null);
+		setRemoteStream(null);
+	};
 
-  // Empty screen to initialize the call
-  return (
-    <View style={styles.container}>
-      <Button iconName="video" backgroundColor="gray" onPress={create} />
-    </View>
-  );
+	const firestoreCleanUp = async () => {
+		if (callRef) {
+			const calleeCandidate = await callRef.collection('callee').get();
+			calleeCandidate.forEach(async (candidate) => {
+				await candidate.ref.delete();
+			});
+
+			const callerCandidate = await callRef.collection('caller').get();
+			callerCandidate.forEach(async (candidate) => {
+				await candidate.ref.delete();
+			});
+
+			callRef.delete();
+		}
+	};
+
+	// Displays the getting call screen
+	if (incommingCall) {
+		return <IncomingCall hangup={hangup} join={join} />;
+	}
+
+	// Display the local stream on calling
+	// Display both local and remote streams onve the call is connected
+	if (localStream) {
+		return (
+			<VideoCall
+				localStream={localStream}
+				remoteStream={remoteStream}
+				hangup={hangup}
+				isPatient={isPatient}
+				isClinician={isClinician}
+				isMuted={isMuted}
+				toggleMute={muteCall}
+			/>
+		);
+	}
+
+	// Empty screen to initialize the call
+	return (
+		<View style={styles.container}>
+			<Button iconName="video" backgroundColor="gray" onPress={create} />
+		</View>
+	);
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+	container: {
+		flex: 1,
+		backgroundColor: '#fff',
+		alignItems: 'center',
+		justifyContent: 'center',
+	},
 });
 
 export default TeleHealth;
